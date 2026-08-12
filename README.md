@@ -43,10 +43,10 @@ Option A, if you have git:
 
 ```bash
 cd ~
-git clone <REPO-URL> skool-mcp
+git clone https://github.com/Solnest-AI/skool-mcp-community.git skool-mcp
 ```
 
-Replace `<REPO-URL>` with the link from the Skool post you got this from.
+That drops it at `~/skool-mcp`, which is exactly where you want it.
 
 Option B, the ZIP:
 
