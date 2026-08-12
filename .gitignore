@@ -1,0 +1,30 @@
+# Secrets — NEVER commit
+.env
+key.txt
+session.txt
+cookie.txt
+
+# Browser captures — contain your LIVE Skool login session. Treat like a password.
+*.har
+skool-capture.json
+skool-cookies.json
+storage_state.json
+*-capture.json
+*-cookies.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Auto-refresh runtime artifacts
+refresh.log
+.env.tmp
+
+# OS clutter
+.DS_Store
+Thumbs.db
+
+# uv.lock is deliberately NOT ignored — committing it pins the exact dependency
+# versions every member installs, so "works on mine" means "works on theirs".

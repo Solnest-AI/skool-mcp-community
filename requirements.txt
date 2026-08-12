@@ -1,0 +1,8 @@
+# pip fallback. Prefer `uv sync`, which reads pyproject.toml and pins the same set.
+# Keep this file in sync with [project.dependencies] in pyproject.toml.
+mcp>=2.0.0,<3
+httpx>=0.27
+python-dotenv>=1.0
+playwright>=1.40
+
+# Running the tests with pip instead of uv also needs: pytest>=8

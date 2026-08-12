@@ -1,0 +1,31 @@
+[project]
+name = "skool-mcp"
+version = "1.0.0"
+description = "MCP server for your own Skool community: posts, members, classroom, DMs."
+requires-python = ">=3.10"
+dependencies = [
+    # Upper bound is deliberate. SDK 2.0 deleted mcp.server.fastmcp, which silently
+    # broke every install pinned only to >=1.2.0. Cap the major version so the next
+    # one can't do the same to members mid-course.
+    "mcp>=2.0.0,<3",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    # connect_skool.py and refresh_cookie.py both drive a browser. Historically
+    # missing from requirements.txt, which broke every fresh install.
+    "playwright>=1.40",
+]
+
+# Installed by `uv sync` / `uv run` by default so `uv run pytest` just works.
+# Skip it with `uv sync --no-dev` for a runtime-only install.
+[dependency-groups]
+dev = ["pytest>=8"]
+
+# This is a set of scripts, not an installable library. Without this uv would try
+# to build and install the project itself into the venv on every `uv run`.
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+# The tests live in tests/ but import the modules from the repo root.
+pythonpath = ["."]
+testpaths = ["tests"]
