@@ -7,11 +7,22 @@ logged-in session cookie:
   - www.skool.com    — Next.js pages; list views (feed, members, classroom) are
                        read from the embedded __NEXT_DATA__ JSON blob.
 
-Auth is the full Cookie header captured by connect_skool.py (includes auth_token
-and the aws-waf-token that clears AWS's firewall). The waf token lasts ~4 days;
-refresh_cookie.py re-mints it automatically if the background job is installed,
-otherwise re-run connect_skool.py. All HTTP/parsing lives here so server.py stays
-a thin list of tools.
+Auth is the full Cookie header captured by connect_skool.py. The load-bearing
+cookie is auth_token, a ~1-year JWT — measured 2026-08-13, api2 answers 200 with
+auth_token alone and no aws-waf-token present, so a missing waf token is NOT an
+auth failure and must never be reported as one.
+
+api2.skool.com sits behind CloudFront + AWS WAF, which is a SEPARATE failure
+surface from Skool's auth:
+  * 401 + short plain-text body  -> Skool saw the request and rejected the cookie.
+  * 403 + CloudFront HTML body   -> the edge blocked it; Skool never saw it. This
+    says nothing about the cookie. It is triggered by a library User-Agent
+    (python-httpx/curl/empty) or by the caller's egress IP (VPN, proxy, hosting
+    provider, or Amazon's IP-reputation list).
+Conflating the two is what sends people hunting a phantom expired cookie, so
+_handle keeps them strictly apart.
+
+All HTTP/parsing lives here so server.py stays a thin list of tools.
 """
 import json
 import os
@@ -33,6 +44,16 @@ _GID_CACHE = {}
 
 class AuthError(RuntimeError):
     """Raised when the cookie is missing or rejected (usually expired)."""
+
+
+class EdgeBlocked(RuntimeError):
+    """Raised when CloudFront/AWS WAF blocked the request before Skool saw it.
+
+    Deliberately NOT an AuthError. Every caller that treats "cannot reach Skool"
+    as "your login expired" sends the member off to re-authenticate, which cannot
+    possibly fix a network-layer block — that dead end is the whole reason this
+    class exists.
+    """
 
 
 # --- config / auth ------------------------------------------------------------
@@ -68,17 +89,56 @@ def _group_id() -> str:
 
 
 def _headers() -> dict:
+    """Headers for every Skool call.
+
+    The user-agent is not cosmetic: api2 is behind AWS WAF, and a library UA
+    (python-httpx, python-requests, curl) or an absent one is blocked at the edge
+    with a CloudFront 403 before Skool ever sees the request. Verified 2026-08-13
+    — the same cookie returns 200 with a browser UA and 403 with httpx's default.
+    The sec-fetch/origin/referer trio mirrors the XHR the Skool web app itself
+    sends, so the request does not stand out as scripted to the bot rules.
+    """
     return {"Cookie": _cookie(), "content-type": "application/json",
-            "accept": "application/json", "user-agent": UA}
+            "accept": "application/json", "user-agent": UA,
+            "accept-language": "en-US,en;q=0.9",
+            "origin": WWW, "referer": WWW + "/",
+            "sec-fetch-site": "same-site", "sec-fetch-mode": "cors",
+            "sec-fetch-dest": "empty"}
 
 
 # --- transport ----------------------------------------------------------------
+def is_edge_block(r: httpx.Response) -> bool:
+    """True when CloudFront/AWS WAF blocked this before Skool saw it.
+
+    Skool's own auth layer answers 401 with a short plain-text body. A 403 whose
+    body is CloudFront's error page is a network-layer verdict on the CALLER, not
+    on the cookie — so it must never be reported as an expired session.
+    """
+    if r.status_code != 403:
+        return False
+    fingerprint = f"{r.headers.get('server', '')} {r.headers.get('via', '')}".lower()
+    return "cloudfront" in fingerprint or "<html" in (r.text[:400] or "").lower()
+
+
+EDGE_BLOCK_HELP = (
+    "Blocked by Skool's CDN (CloudFront), not by Skool itself — the request never "
+    "reached Skool, so your login is fine and reconnecting will NOT help.\n"
+    "This is about where your traffic comes from. Try, in order:\n"
+    "  1. Disconnect any VPN or proxy, then retry.\n"
+    "  2. Switch networks (wifi -> phone hotspot) — shared/flagged IPs get blocked.\n"
+    "  3. Unset HTTP_PROXY/HTTPS_PROXY in your shell, then retry.\n"
+    "Run `uv run net_check.py` to confirm which of these it is."
+)
+
+
 def _handle(r: httpx.Response, where: str):
+    if is_edge_block(r):
+        raise EdgeBlocked(EDGE_BLOCK_HELP)
     if r.status_code in (401, 403):
         raise AuthError(
-            "Skool rejected the request — your cookie has almost certainly expired "
-            "(the anti-bot token lasts ~4 days). Run `uv run connect_skool.py` to reconnect, "
-            "or `uv run doctor.py` to see exactly what's wrong."
+            "Skool rejected your session (HTTP %d) — the cookie has almost certainly "
+            "expired. Run `uv run connect_skool.py` to reconnect, or `uv run doctor.py` "
+            "to see exactly what's wrong." % r.status_code
         )
     if r.status_code == 404:
         raise RuntimeError(f"Not found: {where} (bad id/slug?).")
@@ -91,29 +151,84 @@ def _handle(r: httpx.Response, where: str):
         return {"raw": r.text[:CHARACTER_LIMIT]}
 
 
+# AWS WAF gates api2 on TWO independent signals, and fixing only one leaves a
+# machine broken in a way that looks identical to the other:
+#
+#   1. The User-Agent header. A library UA ("python-httpx/...", "curl/...", or an
+#      absent one) is 403'd outright. Measured 2026-08-17: this fires even behind
+#      a perfect Chrome TLS handshake, so it is a genuinely separate rule.
+#   2. The TLS handshake fingerprint (JA3/JA4), applied on SOME source IPs.
+#      Python's OpenSSL handshake does not look like Chrome's. On most IPs this is
+#      not inspected — a browser UA over plain httpx is enough — but on an IP the
+#      WAF has flagged, only a real Chrome fingerprint gets through.
+#
+# So the transport prefers curl_cffi (Chrome-impersonating TLS) and keeps httpx as
+# the fallback. httpx alone is correct for the common case and was verified
+# working; it just cannot clear signal 2, which is invisible until you hit an IP
+# where it matters and then looks exactly like an unfixable network block.
+IMPERSONATE = os.environ.get("SKOOL_IMPERSONATE", "").strip() or "chrome"
+
+try:
+    from curl_cffi import requests as _curl
+except ImportError:  # optional: older installs keep working on httpx alone
+    _curl = None
+
+
+def tls_impersonation_available() -> bool:
+    """Whether this install can present a Chrome TLS fingerprint."""
+    return _curl is not None
+
+
+def _request(method: str, url: str, *, headers: dict, params=None, json_body=None,
+             follow_redirects: bool = False, timeout: int = 40):
+    """One HTTP call, with a real Chrome TLS fingerprint when available.
+
+    Returns something response-shaped either way: both backends expose
+    .status_code, .headers.get() and .text, which is all _handle and
+    is_edge_block touch.
+    """
+    if _curl is not None:
+        kwargs = {"headers": headers, "timeout": timeout,
+                  "impersonate": IMPERSONATE, "allow_redirects": follow_redirects}
+        if params:
+            kwargs["params"] = params
+        if json_body is not None:
+            kwargs["json"] = json_body
+        try:
+            return getattr(_curl, method)(url, **kwargs)
+        except Exception:
+            # A curl_cffi-specific failure (missing native lib, unknown
+            # impersonation target) must not take out an install that httpx can
+            # still serve. Fall through rather than surfacing a confusing error.
+            pass
+    with httpx.Client(timeout=timeout, follow_redirects=follow_redirects) as c:
+        return c.request(method.upper(), url, headers=headers,
+                         params=params or {},
+                         json=json_body if json_body is not None else None)
+
+
 def _api_get(path: str, params: dict | None = None):
-    with httpx.Client(timeout=40) as c:
-        r = c.get(API + path, headers=_headers(), params=params or {})
+    r = _request("get", API + path, headers=_headers(), params=params or {})
     return _handle(r, path)
 
 
 def _api_post(path: str, payload=None, params: dict | None = None):
-    with httpx.Client(timeout=40) as c:
-        r = c.post(API + path, headers=_headers(), params=params or {},
-                   json=payload if payload is not None else {})
+    r = _request("post", API + path, headers=_headers(), params=params or {},
+                 json_body=payload if payload is not None else {})
     return _handle(r, path)
 
 
 def _api_put(path: str, payload=None):
-    with httpx.Client(timeout=40) as c:
-        r = c.put(API + path, headers=_headers(), json=payload or {})
+    r = _request("put", API + path, headers=_headers(), json_body=payload or {})
     return _handle(r, path)
 
 
 def _page_props(path: str) -> dict:
     """Fetch a www.skool.com page and return props.pageProps from __NEXT_DATA__."""
-    with httpx.Client(timeout=40, follow_redirects=True) as c:
-        r = c.get(WWW + path, headers={**_headers(), "accept": "text/html"})
+    r = _request("get", WWW + path, headers={**_headers(), "accept": "text/html"},
+                 follow_redirects=True)
+    if is_edge_block(r):
+        raise EdgeBlocked(EDGE_BLOCK_HELP)
     if r.status_code in (401, 403):
         raise AuthError("Cookie expired — re-run `uv run connect_skool.py`.")
     r.raise_for_status()

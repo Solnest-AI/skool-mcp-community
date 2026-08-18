@@ -257,14 +257,19 @@ def check_auth_token(cookies: dict) -> Check:
 
 
 def check_waf_token(cookies: dict) -> Check:
+    """Report the WAF token, but never imply it is required.
+
+    Measured against live api2 on 2026-08-13: /self/groups returns 200 with
+    auth_token alone and NO aws-waf-token in the header. The old wording here
+    ("Skool's firewall may block requests") was wrong, and it cost a member hours
+    of chasing a token that was never the problem — the real block is a CloudFront
+    rule on User-Agent and caller IP, which no cookie can influence. INFO only.
+    """
     name = "AWS WAF token"
     token = (cookies or {}).get("aws-waf-token", "")
     if token:
         return Check(name, PASS, f"present ({len(token)} chars)")
-    # WARN not FAIL: this one is short-lived and re-minted automatically. The live
-    # auth check below is the authority on whether requests actually get through.
-    return Check(name, WARN, "missing (Skool's firewall may block requests)",
-                 "Run `uv run refresh_cookie.py` to mint a fresh one.")
+    return Check(name, INFO, "not present (optional — auth_token alone authenticates)")
 
 
 def check_group(env: dict) -> Check:

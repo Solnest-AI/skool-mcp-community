@@ -120,14 +120,33 @@ uv run doctor.py
 
 It tells you exactly which piece is broken and how to fix it. It never prints your cookie.
 
-**Your session expires eventually.** The Skool login token lasts about a year. The AWS firewall
-token bundled with it lasts about 4 days, and that is the one that quietly kills your tools. Setup
-offers an optional background job that refreshes it for you. If you skip it, just re-run
-`uv run connect_skool.py` whenever the tools start failing.
+**Your session expires eventually.** The Skool login token lasts about a year, so this is rare.
+Re-run `uv run connect_skool.py` when the tools start failing with a login error.
+
+**A 403 is a different problem, and logging in again will not fix it.** Skool's API sits behind a
+firewall (AWS WAF) that can refuse your computer before Skool ever sees the request. Your login is
+completely fine when this happens. There are two versions of it, and they need opposite fixes:
+
+- **Your connection's fingerprint.** The firewall inspects the technical signature of the
+  connection itself, and plain Python does not look like a browser. The bundle handles this
+  automatically now by borrowing Chrome's signature. Changing networks does nothing for it.
+- **Your IP address.** The firewall refuses the address you are coming from, usually a VPN, a
+  proxy, or an address you share with a lot of other people. Only changing your network fixes it.
+
+You do not have to work out which one you have. Run:
+
+```bash
+cd ~/skool-mcp
+uv run net_check.py
+```
+
+It needs no login, takes five seconds, and tells you which of the two it is and exactly what to do.
+Do not start by reconnecting your Skool login, that cannot fix either one.
 
 ## Getting help
 
-Run `uv run doctor.py`, then paste the output into Claude and ask it to fix what failed. The output
-is safe to share: it prints check results, cookie lengths, and expiry dates, never the cookie itself.
+Run `uv run doctor.py` (or `uv run net_check.py` for anything that looks like a 403 or "blocked"),
+then paste the output into Claude and ask it to fix what failed. The output is safe to share: it
+prints check results, cookie lengths, and expiry dates, never the cookie itself.
 
 Still stuck? Post in the community with the doctor output. Do not post your `.env`.

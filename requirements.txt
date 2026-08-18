@@ -4,5 +4,10 @@ mcp>=2.0.0,<3
 httpx>=0.27
 python-dotenv>=1.0
 playwright>=1.40
+# Chrome TLS fingerprint. AWS WAF inspects the TLS handshake on some source
+# IPs, and plain Python does not handshake like a browser. Without this the
+# bundle still works on most networks and 403s on those, indistinguishably
+# from an IP block.
+curl-cffi>=0.16.0
 
 # Running the tests with pip instead of uv also needs: pytest>=8

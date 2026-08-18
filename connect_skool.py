@@ -335,12 +335,34 @@ def fetch_groups(cookie_header: str, fatal: bool = True):
         with httpx.Client(timeout=40) as c:
             r = c.get(GROUPS_URL, params={"limit": 50, "prefs": "false"},
                       headers={"Cookie": cookie_header, "accept": "application/json",
-                               "user-agent": UA})
+                               "user-agent": UA, "accept-language": "en-US,en;q=0.9",
+                               "origin": "https://www.skool.com",
+                               "referer": "https://www.skool.com/",
+                               "sec-fetch-site": "same-site", "sec-fetch-mode": "cors",
+                               "sec-fetch-dest": "empty"})
     except Exception as e:
         return bail(f"Could not reach api2.skool.com ({type(e).__name__}).",
                     "Check your internet connection and re-run.")
-    if r.status_code in (401, 403):
-        return bail(f"Skool rejected the session (HTTP {r.status_code}).",
+    # A CloudFront 403 is the CDN refusing THIS MACHINE's traffic; the login the
+    # member just completed is irrelevant to it. Telling them to log in again here
+    # is a dead end they can repeat forever, so the two cases stay separate.
+    try:
+        import skool_client
+        edge_blocked = skool_client.is_edge_block(r)
+    except Exception:
+        edge_blocked = r.status_code == 403 and "<html" in (r.text[:400] or "").lower()
+    if edge_blocked:
+        return bail(
+            "Skool's CDN (CloudFront) blocked this computer's connection.",
+            "Your login is fine — this never reached Skool. Disconnect any VPN or "
+            "proxy, or switch networks (try a phone hotspot), then re-run. "
+            "`uv run net_check.py` confirms it in 5 seconds.")
+    if r.status_code == 401:
+        return bail("Skool rejected the session (HTTP 401 — not logged in).",
+                    "Make sure you were fully logged in before the window closed, "
+                    "then re-run.")
+    if r.status_code == 403:
+        return bail("Skool rejected the session (HTTP 403).",
                     "Make sure you were fully logged in before the window closed, "
                     "then re-run.")
     if r.status_code != 200:

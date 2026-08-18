@@ -162,7 +162,7 @@ finishes without an error. `playwright install chromium` ends with a downloaded/
 **GATE:**
 
 ```bash
-uv run python -c "import mcp, httpx, dotenv, playwright; print('DEPS OK')"
+uv run python -c "import mcp, httpx, dotenv, playwright, curl_cffi; print('DEPS OK')"
 ```
 
 Must print exactly `DEPS OK`. Anything else means Phase 1 is not done.
@@ -513,7 +513,7 @@ The job must be listed. If the installer printed a different name, use that one 
 Before you tell them it is finished, confirm every one of these:
 
 1. The folder is at `~/skool-mcp` or `%USERPROFILE%\skool-mcp`.
-2. `uv run python -c "import mcp, httpx, dotenv, playwright; print('DEPS OK')"` prints `DEPS OK`.
+2. `uv run python -c "import mcp, httpx, dotenv, playwright, curl_cffi; print('DEPS OK')"` prints `DEPS OK`.
 3. `.env` exists. (You never looked inside it.)
 4. `uv run doctor.py` prints `AUTH OK` with no FAIL.
 5. The server is registered and the app was restarted.
@@ -527,12 +527,35 @@ under their name, and that `uv run doctor.py` is the answer to "it stopped worki
 
 Symptom to action, in order:
 
+**Any 403, or any "blocked" message: run `uv run net_check.py` FIRST.** It needs no login and
+answers in five seconds. `api2.skool.com` sits behind CloudFront, which produces two failures that
+look identical from the outside and have opposite fixes:
+
+- **`401`, short text.** Skool rejected the cookie. Reconnecting fixes it (Phase 2).
+- **`403`, CloudFront HTML.** The firewall refused *this computer's connection*. Skool never saw
+  the request, so the login is irrelevant and **reconnecting can never fix it.** There are two
+  distinct causes with opposite fixes, and `net_check.py` reports which one it is:
+  - **TLS fingerprint.** AWS WAF inspects the TLS handshake on some source IPs, and plain Python
+    does not handshake like Chrome. The bundle now sends every request over a Chrome fingerprint
+    (`curl_cffi`), so `uv sync` is the fix. **Changing networks does nothing for this one.** Do not
+    tell the member to disconnect a VPN when `net_check.py` reports TLS_BLOCKED.
+  - **Egress IP.** The address itself is refused (VPN, proxy, hosting provider, or Amazon's IP
+    reputation list). Only a different network fixes it.
+
+Do not skip that check. Reading a CloudFront 403 as an expired session is the single most expensive
+wrong turn with this bundle. It sends the member through login loops that cannot possibly work.
+
 | What they see | What to do |
 |---|---|
+| Any 403, or "blocked" / "could not be satisfied" | `uv run net_check.py` first. If BLOCKED: VPN off, switch network, unset proxy vars. Do NOT reconnect |
 | Tools error with an auth or permission message | `uv run doctor.py`, then Phase 2 if live auth fails |
 | Tools vanished from the app | Phase 4, and restart the app |
-| Everything worked yesterday, nothing today | Almost always the expired firewall token. Phase 2, then offer Phase 6 |
+| Everything worked yesterday, nothing today | `uv run doctor.py`. If live auth fails, Phase 2; if it reports a CDN block, `net_check.py` |
 | Doctor warns the login expires soon | Phase 2 before it does |
 | One specific tool returns odd or empty data | Skool may have changed their site. Note which tool, check for a bundle update |
+
+A missing `aws-waf-token` is **not** a fault and never needs fixing. Measured against live api2 on
+2026-08-13, `auth_token` alone authenticates fine. Doctor reports the token as INFO only. Do not
+chase it.
 
 Never solve any of these by asking for a pasted cookie or by editing `.env` by hand.

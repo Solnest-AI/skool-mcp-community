@@ -188,8 +188,21 @@ def test_check_auth_token_warn_boundary_is_14_days():
 
 def test_check_waf_token_states():
     assert doctor.check_waf_token({"aws-waf-token": WAF}).status == doctor.PASS
-    # WARN, never FAIL: it is short-lived and re-minted by refresh_cookie.py.
-    assert doctor.check_waf_token({}).status == doctor.WARN
+    # INFO, never WARN/FAIL. Verified against live api2 on 2026-08-13: auth_token
+    # alone returns 200 with no aws-waf-token present, so its absence is not a
+    # problem to report. Flagging it sent a member chasing a phantom token for
+    # hours while the real block (a CloudFront rule on User-Agent / caller IP)
+    # went unexamined.
+    assert doctor.check_waf_token({}).status == doctor.INFO
+
+
+def test_missing_waf_token_never_reads_as_a_problem():
+    """Regression guard for the misdiagnosis above — no scary wording, no hint
+    telling the member to go re-mint something that was never required."""
+    check = doctor.check_waf_token({})
+    assert check.status not in (doctor.WARN, doctor.FAIL)
+    assert "block" not in (check.detail or "").lower()
+    assert not (check.hint or "")
 
 
 def test_check_group_states():
