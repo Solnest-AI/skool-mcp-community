@@ -194,7 +194,7 @@ def verdict_lines(python_tls: dict, chrome_tls: dict, proxies: dict) -> list:
 
     out.append("RESULT: Unexpected answer. Skool may have changed something.")
     out.append("")
-    out.append("Send Ryan the FINDINGS above.")
+    out.append("Post the FINDINGS above in the community.")
     return out
 
 
@@ -221,7 +221,7 @@ def render(python_tls: dict, chrome_tls: dict, library_ua: dict,
     lines.extend(verdict_lines(python_tls, chrome_tls, proxies))
     lines.append("")
     lines.append("-" * 68)
-    lines.append("Copy this whole output if you need to send it to Ryan.")
+    lines.append("Copy this whole output if you need to post it in the community.")
     lines.append("(The public IP is yours — redact it if you would rather not share.)")
     lines.append("")
     return "\n".join(lines)

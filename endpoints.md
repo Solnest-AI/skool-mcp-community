@@ -35,6 +35,6 @@ captured from a logged-in browser session and verified live against `solnest-ai`
 
 ## Known gaps / TODO
 - `create_post` (top-level) shape is inferred from the comment body — verify with one real post.
-- Member **approve / reject** endpoints not captured (Ryan had no pending members during capture).
+- Member **approve / reject** endpoints not captured (no pending members in the community during capture).
   Needs a 30-sec recapture while approving one member.
 - `solnest-ai` group_id: `<resolved at runtime from SKOOL_GROUP; or set SKOOL_GROUP_ID in .env>`.

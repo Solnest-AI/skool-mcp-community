@@ -150,3 +150,7 @@ then paste the output into Claude and ask it to fix what failed. The output is s
 prints check results, cookie lengths, and expiry dates, never the cookie itself.
 
 Still stuck? Post in the community with the doctor output. Do not post your `.env`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
