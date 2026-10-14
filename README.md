@@ -93,8 +93,8 @@ Skool yourself, exactly like normal (Google sign-in and 2FA both work). The scri
 session cookie out of that browser and writes it to a local file called `.env`. Nothing is sent to
 Solnest, to Anthropic, or anywhere else.
 
-**Never paste your cookie into a chat.** Not to Claude, not to me, not to anyone in the community
-being helpful. That cookie is your entire Skool account: your posts, your DMs, your billing, your
+**Never paste your cookie into a chat.** Not to Claude, not to a friend, not to anyone online
+offering to help. That cookie is your entire Skool account: your posts, your DMs, your billing, your
 members. Anyone holding it is logged in as you. Setup is built so the cookie never has to appear
 in a conversation, and Claude is instructed to refuse if you offer it.
 
@@ -149,7 +149,8 @@ Run `uv run doctor.py` (or `uv run net_check.py` for anything that looks like a 
 then paste the output into Claude and ask it to fix what failed. The output is safe to share: it
 prints check results, cookie lengths, and expiry dates, never the cookie itself.
 
-Still stuck? Post in the community with the doctor output. Do not post your `.env`.
+Still stuck? Start a fresh Claude chat, paste the doctor output, and say what you were trying to do.
+Never paste your `.env`.
 
 ## License
 

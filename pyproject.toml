@@ -1,6 +1,6 @@
 [project]
 name = "skool-mcp"
-version = "1.0.2"
+version = "1.0.3"
 description = "MCP server for your own Skool community: posts, members, classroom, DMs."
 requires-python = ">=3.10"
 dependencies = [
