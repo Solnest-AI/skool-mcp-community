@@ -5,7 +5,7 @@
     uv run doctor.py --json    # machine-readable, for an agent to parse
     uv run doctor.py --no-live # skip the network check
 
-Ten checks, each PASS / WARN / FAIL / INFO / SKIP with a fix hint. Exit 0 when
+Eleven checks, each PASS / WARN / FAIL / INFO / SKIP with a fix hint. Exit 0 when
 nothing FAILed, 1 otherwise.
 
 SECURITY CONTRACT: this prints cookie LENGTHS and JWT EXPIRY only, never a cookie
@@ -390,6 +390,38 @@ def check_refresh_job(runner=None, system=None) -> Check:
                  "Windows: `powershell -File install_refresh_windows.ps1`.")
 
 
+_TRUTHY = ("1", "true", "yes", "on")
+
+
+def check_write_tools(env: dict, environ=None) -> Check:
+    """Are the opt-in admin write tools on? INFO only, either way.
+
+    Mirrors how server.py resolves it: the process environment wins over .env
+    (load_dotenv never overrides). An env block in the Claude app's MCP config is
+    invisible from a terminal, so "disabled" here can still be on in the app.
+    """
+    name = "Admin write tools"
+    environ = os.environ if environ is None else environ
+    if environ.get("SKOOL_WRITE_TOOLS") is not None:
+        source, raw = "shell environment", environ.get("SKOOL_WRITE_TOOLS")
+    elif (env or {}).get("SKOOL_WRITE_TOOLS") is not None:
+        source, raw = ".env", env.get("SKOOL_WRITE_TOOLS")
+    else:
+        return Check(name, INFO, "disabled (default; an env set in your Claude app's "
+                                 "MCP config is not visible here)",
+                     "Optional and opt-in. See README, 'Admin write tools'.")
+    if str(raw).strip().lower() in _TRUTHY:
+        try:
+            import write_guard
+            where = f" Audit log: {write_guard.AUDIT_LOG}"
+        except Exception:
+            where = ""
+        return Check(name, INFO, f"ENABLED via {source}",
+                     "Every write is two-step (preview + confirm token), rate-capped "
+                     f"and audit-logged.{where}")
+    return Check(name, INFO, f"disabled ({source} has SKOOL_WRITE_TOOLS={raw!r})")
+
+
 # --- orchestration -----------------------------------------------------------------
 def run_checks(env_path: str = ENV_PATH, live: bool = True, whoami=None,
                chromium_runner=None, job_runner=None) -> list:
@@ -412,6 +444,7 @@ def run_checks(env_path: str = ENV_PATH, live: bool = True, whoami=None,
         checks.append(Check(LIVE_CHECK, SKIP, "skipped (--no-live)",
                             "Drop --no-live to test against Skool."))
     checks.append(check_refresh_job(runner=job_runner))
+    checks.append(check_write_tools(env))
     return checks
 
 

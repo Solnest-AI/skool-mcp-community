@@ -28,7 +28,7 @@ confusing failure three phases later.
 `connect_skool.py` writes it. If it is wrong, re-run `connect_skool.py`.
 
 **5. The install location matters.**
-The folder must live at `~/skool-mcp` on Mac or `%USERPROFILE%\skool-mcp` on Windows. Not
+The folder must live at `~/skool-mcp` on Mac or Linux, or `%USERPROFILE%\skool-mcp` on Windows. Not
 Documents, Desktop, or Downloads. macOS blocks background processes from reading those folders,
 which breaks the auto-refresh job in Phase 6 and costs an afternoon of Full Disk Access debugging.
 Moving the folder now avoids the problem entirely.
@@ -46,7 +46,11 @@ All commands assume you are in the bundle folder. `cd` there first and stay ther
 **Goal:** know the OS, whether `uv` exists, where the folder actually is, and which Claude app the
 member wants to use the tools in.
 
-macOS:
+Linux works too: it was tested on a Grok Bot computer on Nov 19, 2026 (doctor 10 of 10 checks at the
+time, `refresh_cookie.py --dry-run` and a real refresh both OK). On Linux, use every "macOS and
+Linux" command below.
+
+macOS and Linux:
 
 ```bash
 uname -s
@@ -62,7 +66,7 @@ Get-Location
 if (Get-Command uv -ErrorAction SilentlyContinue) { uv --version } else { "UV NOT INSTALLED" }
 ```
 
-**Expected output:** `Darwin` or a PowerShell version, an absolute folder path, and either a uv
+**Expected output:** `Darwin` (Mac), `Linux`, or a PowerShell version, an absolute folder path, and either a uv
 path/version or `UV NOT INSTALLED`. Both are fine at this stage.
 
 **GATE:** you can state the OS, the absolute folder path, and whether uv is installed.
@@ -86,7 +90,7 @@ that one instead and `cd` into it.
 Then step out of the folder before moving it. A shell sitting inside a folder will block the move
 on Windows.
 
-macOS:
+macOS and Linux:
 
 ```bash
 SRC="$(pwd)"; cd ~ && mv "$SRC" ~/skool-mcp && cd ~/skool-mcp && pwd
@@ -128,7 +132,7 @@ automatically, so they never have to think about Python versions.
 
 **1a. Install uv** (skip if Phase 0 found it).
 
-macOS:
+macOS and Linux:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -155,6 +159,10 @@ uv run playwright install chromium
 
 The Chromium download is roughly 150 MB and can take a couple of minutes. Say so, so the member
 does not think it hung.
+
+Linux: if you reach for `uv run playwright install --with-deps chromium` and it fails because apt
+fails (no sudo, locked package manager), skip `--with-deps`. Plain `uv run playwright install
+chromium` is what worked on the tested Linux machine.
 
 **Expected output:** uv prints a version. `uv sync` prints a list of installed packages and
 finishes without an error. `playwright install chromium` ends with a downloaded/installed message.
@@ -211,7 +219,7 @@ exactly one line:
 
 **GATE:** the command exits 0 **and** the file exists. Check existence only, never contents.
 
-macOS:
+macOS and Linux:
 
 ```bash
 test -f .env && echo "ENV FILE PRESENT"
@@ -293,7 +301,7 @@ pwd
 
 ### Branch A. Claude Code
 
-macOS:
+macOS and Linux:
 
 ```bash
 claude mcp add skool -- uv --directory "$HOME/skool-mcp" run server.py
@@ -475,6 +483,64 @@ Windows:
 powershell -ExecutionPolicy Bypass -File .\install_refresh_windows.ps1
 ```
 
+Linux: there is no installer, you schedule it. Use full paths everywhere (cron and systemd do not
+read the shell profile, so a bare `uv` is not found). Get them first:
+
+```bash
+pwd; command -v uv
+```
+
+Prove one refresh works before scheduling it (writes nothing):
+
+```bash
+uv run refresh_cookie.py --dry-run
+```
+
+Then pick one of these, substituting the two real paths. Run it about every 2 days.
+
+- **cron** (`crontab -e`, add one line; 04:00 on every other day of the month):
+
+  ```
+  0 4 */2 * * cd /home/YOURNAME/skool-mcp && /home/YOURNAME/.local/bin/uv run refresh_cookie.py
+  ```
+
+- **systemd user timer.** Create `~/.config/systemd/user/skool-refresh.service`:
+
+  ```ini
+  [Unit]
+  Description=Refresh the Skool MCP cookie
+
+  [Service]
+  Type=oneshot
+  WorkingDirectory=/home/YOURNAME/skool-mcp
+  ExecStart=/home/YOURNAME/.local/bin/uv run refresh_cookie.py
+  ```
+
+  and `~/.config/systemd/user/skool-refresh.timer`:
+
+  ```ini
+  [Unit]
+  Description=Refresh the Skool MCP cookie every 2 days
+
+  [Timer]
+  OnCalendar=*-*-01/2 04:00:00
+  Persistent=true
+
+  [Install]
+  WantedBy=timers.target
+  ```
+
+  then `systemctl --user daemon-reload && systemctl --user enable --now skool-refresh.timer`. On a
+  machine nobody stays logged into, also run `loginctl enable-linger "$USER"` or the timer only
+  runs while someone is logged in.
+
+- **A Grok Bot (or other agent) scheduled routine:** have it run
+  `cd /home/YOURNAME/skool-mcp && /home/YOURNAME/.local/bin/uv run refresh_cookie.py` every 2 days.
+
+`.env` stays mode 0600: the refresh writes it that way. The refresh log is
+`~/.local/state/skool-mcp/refresh.log`. These schedules are templates: the refresh itself was tested
+on Linux, the cron and systemd wiring above was not.
+
 **Expected output:** the installer confirms the job is registered and prints the uninstall command.
 On Mac the job is `com.skoolmcp.cookie-refresh`. On Windows it is `SkoolMCP-CookieRefresh`. Give the
 member the uninstall command the installer printed, so they can remove it later without you.
@@ -495,6 +561,9 @@ Get-ScheduledTask -TaskName "SkoolMCP-CookieRefresh" | Select-Object TaskName, S
 
 The job must be listed. If the installer printed a different name, use that one instead.
 
+Linux: `crontab -l | grep refresh_cookie` (cron) or `systemctl --user list-timers skool-refresh.timer`
+(systemd) must show it. For a bot routine, ask the member to confirm it is saved.
+
 **If it fails:**
 - The Mac installer prints Full Disk Access instructions: that only happens when the folder sits
   under a protected folder. The clean fix is to move it to `~/skool-mcp` and redo Phase 4 (the
@@ -508,17 +577,76 @@ The job must be listed. If the installer printed a different name, use that one 
 
 ---
 
+## Phase 7. Optional, admin write tools. Only if the member asks
+
+**Goal:** a community owner or admin can approve and decline join requests, edit and delete posts,
+manage calendar events, and invite by email from Claude.
+
+Do not offer this to someone who is just a member of a community. Do not turn it on by default.
+
+**Say this to the member, plainly, before enabling anything:**
+
+- Every admin write is two steps. The first call only shows a preview. Nothing happens until they
+  see it and say yes.
+- Skool has no official API. Automated admin actions can get an account limited. Keep a human
+  approving every write, keep it slow.
+- These tools were tested offline only. They should do one approve, one post edit, and one event
+  create and delete on a community where a mistake does not matter before relying on them. The
+  invite tool is the least proven (a single public source).
+
+**Enable it in the server registration, never by editing `.env`.**
+
+Claude Code (macOS and Linux):
+
+```bash
+claude mcp remove skool
+claude mcp add skool -e SKOOL_WRITE_TOOLS=1 -- uv --directory "$HOME/skool-mcp" run server.py
+```
+
+Windows:
+
+```powershell
+claude mcp remove skool
+claude mcp add skool -e SKOOL_WRITE_TOOLS=1 -- uv --directory "$env:USERPROFILE\skool-mcp" run server.py
+```
+
+Claude Desktop: in the existing `"skool"` entry of `claude_desktop_config.json`, add
+`"env": {"SKOOL_WRITE_TOOLS": "1"}` next to `"command"` and `"args"`. Change nothing else. Validate
+the JSON with the Phase 4 command. Then fully quit and reopen the app.
+
+**GATE:** in a fresh session the member sees `skool_approve_member` and the other admin tools.
+Then have them ask: "Show me my pending Skool join requests." That is a read. If they want to test
+a write, ask for a preview only ("preview approving the first one, do not confirm") and check the
+preview names the right person.
+
+**If it fails:**
+- The admin tools do not appear: the variable did not reach the server. Re-check the registration
+  and restart the app. `uv run doctor.py` cannot see app-level env, so its "Admin write tools: disabled"
+  line is not proof either way.
+- A write is refused with "Rate cap reached": working as designed. Wait, or raise that cap's
+  variable (README, "Admin write tools").
+- A write is refused because the audit log is not writable: fix permissions on the log path the
+  error names. The tool will not write without an audit trail.
+- "not in the current pending list" on a decline: the request was already handled, or a user id
+  was passed instead of the membership id from `skool_list_pending_members`. This refusal is the
+  safety rail that stops a decline from removing an active member. Never work around it.
+
+To turn it off: re-register without `-e SKOOL_WRITE_TOOLS=1` (or remove the `env` line) and restart.
+
+---
+
 ## Done. Confirm all of it
 
 Before you tell them it is finished, confirm every one of these:
 
-1. The folder is at `~/skool-mcp` or `%USERPROFILE%\skool-mcp`.
+1. The folder is at `~/skool-mcp` (Mac, Linux) or `%USERPROFILE%\skool-mcp` (Windows).
 2. `uv run python -c "import mcp, httpx, dotenv, playwright, curl_cffi; print('DEPS OK')"` prints `DEPS OK`.
 3. `.env` exists. (You never looked inside it.)
 4. `uv run doctor.py` prints `AUTH OK` with no FAIL.
 5. The server is registered and the app was restarted.
 6. `skool_whoami` returned their real community.
 7. Auto-refresh is either installed or consciously skipped.
+8. Admin write tools are off, unless the member asked for them and heard the risks (Phase 7).
 
 Then tell them, in one short paragraph: what they can ask for, that writes are public and go out
 under their name, and that `uv run doctor.py` is the answer to "it stopped working".

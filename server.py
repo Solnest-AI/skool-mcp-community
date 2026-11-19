@@ -13,6 +13,7 @@ try:                                      # mcp SDK 2.x
 except ImportError:                       # mcp SDK 1.x
     from mcp.server.fastmcp import FastMCP as MCPServer
 
+import admin_tools
 import skool_client as sk
 
 mcp = MCPServer("skool")
@@ -114,6 +115,15 @@ def skool_start_chat(user_id: str) -> dict:
     """Open a new DM with a member (by their user_id from skool_list_members).
     Returns the new conversation so you can then skool_send_message into it."""
     return sk.start_chat(user_id=user_id)
+
+
+# --- admin tools (admin_tools.py) -------------------------------------------
+# Always: skool_list_pending_members, skool_list_events (reads).
+# Only with SKOOL_WRITE_TOOLS=1: approve/decline members, reply to a comment,
+# edit/delete posts, create/update/delete events, invite by email. Each is
+# two-step (preview + confirm token), rate-capped, and audit-logged. With the
+# switch off they are never registered, so an agent cannot see or call them.
+admin_tools.register(mcp)
 
 
 if __name__ == "__main__":

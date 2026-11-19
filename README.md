@@ -9,8 +9,12 @@ Unofficial. Not built by Skool, not affiliated with Skool.
 
 ## What you can do with it
 
-13 tools. The read ones are safe to fire off. The write ones post publicly under your name, so
-Claude should confirm the wording with you first.
+15 tools out of the box. The read ones are safe to fire off. The write ones post publicly under
+your name, so Claude should confirm the wording with you first.
+
+If you run the community, there are 9 more admin tools (approve or decline join requests, edit or
+delete posts, manage calendar events, invite by email). Those are off until you turn them on. See
+[Admin write tools](#admin-write-tools-opt-in) below.
 
 | Tool | What it does | Read or write |
 |---|---|---|
@@ -27,10 +31,14 @@ Claude should confirm the wording with you first.
 | `skool_send_message` | Sends a DM into an existing conversation. | write |
 | `skool_mark_read` | Marks a DM conversation as read. | write |
 | `skool_start_chat` | Opens a new DM with a member. | write |
+| `skool_list_pending_members` | Lists join requests waiting for approval: name, answers to your join questions, risk score when Skool gives one. Admins only. | read |
+| `skool_list_events` | Lists your community's calendar events. | read |
 
 ## Before you start
 
-- macOS or Windows. (Linux is untested.)
+- macOS, Windows, or Linux. Linux was tested on a Grok Bot computer on Nov 19, 2026: the doctor
+  passed 10 out of 10 checks (it has 11 now, the new one is informational), and both a
+  `refresh_cookie.py --dry-run` and a real refresh worked.
 - Claude Code or Claude Desktop.
 - A Skool account that is actually a member of the community you want to connect.
 - That's it. You do not need Python installed. The setup installs everything it needs.
@@ -142,6 +150,94 @@ uv run net_check.py
 
 It needs no login, takes five seconds, and tells you which of the two it is and exactly what to do.
 Do not start by reconnecting your Skool login, that cannot fix either one.
+
+## Admin write tools (opt-in)
+
+For people who own or admin a community. Off by default. With the switch off, Claude cannot even
+see these tools.
+
+| Tool | What it does |
+|---|---|
+| `skool_approve_member` | Approves a pending join request. |
+| `skool_decline_member` | Declines a pending join request. Refuses anything that is not currently pending, because the same call on an active member removes them. |
+| `skool_reply_to_comment` | Replies to a comment on a post. |
+| `skool_edit_post` | Edits a post's or comment's title or text. Keeps attachments, labels and videos. |
+| `skool_delete_post` | Deletes a post (and all its comments) or a comment (and its replies). |
+| `skool_create_event` | Creates a calendar event. |
+| `skool_update_event` | Changes a calendar event. |
+| `skool_delete_event` | Deletes a calendar event. Recurring events are refused, do those in Skool. |
+| `skool_invite_members` | Invites people by email. Unverified endpoint, see below. |
+
+**Turning them on.** Set `SKOOL_WRITE_TOOLS=1` in the environment the server runs in, then restart
+the app. The clean way is the server registration, so you never touch `.env`:
+
+- Claude Code: remove and re-add the server with the variable:
+  `claude mcp remove skool` then
+  `claude mcp add skool -e SKOOL_WRITE_TOOLS=1 -- uv --directory "$HOME/skool-mcp" run server.py`
+- Claude Desktop: add `"env": {"SKOOL_WRITE_TOOLS": "1"}` inside the `"skool"` entry of
+  `claude_desktop_config.json`, next to `"command"` and `"args"`. Then fully quit and reopen.
+
+To turn them off, take the variable out and restart. `uv run doctor.py` shows an "Admin write
+tools" line. It can only see your shell and `.env`, not the Claude app's config, so "disabled"
+there does not prove they are off in the app.
+
+**Every write is two steps.** The first call never changes anything. It reads the target fresh,
+then shows you exactly what would be sent (the member's name and answers, the post's current
+text, the event before and after), any warnings, and a one-time confirm token. Only a second call
+with that token, the same arguments, and within 10 minutes actually does it. Right before writing
+it reads the target again, so a request someone already approved in the browser, or a post that
+is already gone, gets caught instead of acted on blind. Tell Claude to show you the preview and
+wait for your yes.
+
+**A network error is never retried automatically.** If the connection drops while an admin write
+is in flight, it may or may not have reached Skool. The tool says so and stops instead of
+re-sending, because re-sending a reply or an invite that did land would do it twice. Check in
+Skool, then preview again if it is still needed.
+
+**Rate caps.** Counted from the audit log, so restarting does not reset them. Change any of them
+with the environment variable (same place as `SKOOL_WRITE_TOOLS`):
+
+| What | Default | Variable |
+|---|---|---|
+| Approvals + declines per hour | 30 | `SKOOL_CAP_MEMBERS_PER_HOUR` |
+| Approvals + declines per day | 200 | `SKOOL_CAP_MEMBERS_PER_DAY` |
+| Emails per invite call | 5 | `SKOOL_CAP_INVITES_PER_CALL` |
+| Invite emails per day | 20 | `SKOOL_CAP_INVITES_PER_DAY` |
+| Calendar creates, updates, deletes per hour | 10 | `SKOOL_CAP_CALENDAR_PER_HOUR` |
+| Replies, post edits, deletes per hour | 20 | `SKOOL_CAP_POSTS_PER_HOUR` |
+| Seconds between any two writes | 1 (can only go up) | `SKOOL_WRITE_MIN_INTERVAL` |
+
+**Audit log.** Every write attempt, its result, and every refused confirm is appended as one JSON
+line: time, tool, community, the ids it touched, and the outcome. Never your cookie, and never a
+message body (free text is clipped to 200 characters). If the log cannot be written, the write is
+refused.
+
+- Mac: `~/Library/Logs/skool-mcp-audit.jsonl`
+- Windows: `%LOCALAPPDATA%\skool-mcp\audit.jsonl`
+- Linux: `~/.local/state/skool-mcp/audit.jsonl`
+
+**The honest risk.** Skool has no official API and does not bless automation. Accounts that act
+like bots can get limited, and admin actions are the ones a platform watches. Keep a human
+approving every write, keep it slow, and do not loop these tools over your whole member list. The
+caps are there to stop a runaway agent, not to tell you how much is safe.
+
+**What has not been tested live.** These tools were built and tested offline against recorded
+request shapes from public sources. Before you rely on them, do one approve, one post edit, and one
+event create and delete on a community where a mistake does not matter, and check the result in
+Skool. The invite endpoint has a single public source and is the least proven of the lot.
+`endpoints.md` lists exactly what is and is not verified.
+
+## Running it on Linux
+
+Setup is the same as macOS. Two Linux notes:
+
+- If `uv run playwright install --with-deps chromium` fails because apt fails, skip `--with-deps`.
+  Plain `uv run playwright install chromium` works.
+- There is no installer for the auto-refresh job on Linux. Schedule this yourself to run about
+  every 2 days, with full paths (cron and systemd do not read your shell profile):
+  `cd /full/path/to/skool-mcp && /full/path/to/uv run refresh_cookie.py`.
+  A cron line, a systemd user timer, or a Grok Bot scheduled routine all work. `SETUP.md` Phase 6
+  has copy-paste versions. `.env` stays mode 0600, and the refresh keeps it that way.
 
 ## Getting help
 
