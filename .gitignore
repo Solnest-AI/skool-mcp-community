@@ -22,6 +22,10 @@ __pycache__/
 refresh.log
 .env.tmp
 
+# Updater: backups of replaced files and the list of files this copy shipped
+.update-backup/
+.skool-mcp-files.txt
+
 # OS clutter
 .DS_Store
 Thumbs.db
