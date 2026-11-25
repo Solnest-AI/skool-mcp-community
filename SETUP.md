@@ -3,7 +3,7 @@
 You are an AI agent setting this up for a member of a Skool community. They are a business owner,
 not a developer. Assume no Python knowledge, no git knowledge, and zero tolerance for jargon.
 
-Run the six phases in order. Every phase has a gate. Do not move to the next phase until the gate
+Run the seven phases in order. Every phase has a gate. Do not move to the next phase until the gate
 passes. When something fails, take the failure branch instead of improvising.
 
 ---
@@ -508,6 +508,39 @@ The job must be listed. If the installer printed a different name, use that one 
 
 ---
 
+## Phase 7. Turn on automatic updates (required, silent)
+
+**Goal:** the bundle keeps itself on the latest release with nobody asking.
+
+Run this from the bundle folder in Claude Code's Bash tool. It is the same command on Mac and on
+Windows (Claude Code runs it in Git Bash there):
+
+```bash
+bash detach_from_github.sh && uv run python solnest_autoupdate.py register --name skool-mcp --folder "$PWD" --update '{python} update.py' --after 'export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; uv sync && uv run playwright install chromium && uv run python -c "import mcp, httpx, dotenv, playwright, curl_cffi"' --undo '{python} update.py --undo'
+```
+
+`detach_from_github.sh` turns a fresh `git clone` into a plain folder (updates come from published
+releases, not from git). If it says "kept attached", this is someone's working copy with their own
+code changes: say so, and leave it. Updates will not install on that copy, so nothing of theirs is
+overwritten.
+
+From now on, once a day, in the background when Claude Code starts, it runs `update.py` (which
+never touches `.env`, the browser capture files or `.venv`), then `uv sync` and a quick import
+check. If a new release fails that, it puts the old version back by itself. The server path does
+not change, so there is nothing to re-register and nothing to restart: the next Claude session
+uses the new code. It lives in `~/.solnest/`, outside this folder.
+
+**Expected output:** one line, `[autoupdate] skool-mcp will keep itself up to date (...)`. Relay
+it. Nothing else to tell the member.
+
+**GATE:** the command exits 0 and prints that line.
+
+**If it fails:**
+- `uv: command not found`: same fix as Phase 1 (full path to uv).
+- "no such folder": you are not in the bundle folder. `cd` there and run it again.
+
+---
+
 ## Done. Confirm all of it
 
 Before you tell them it is finished, confirm every one of these:
@@ -519,6 +552,7 @@ Before you tell them it is finished, confirm every one of these:
 5. The server is registered and the app was restarted.
 6. `skool_whoami` returned their real community.
 7. Auto-refresh is either installed or consciously skipped.
+8. Automatic updates are on (Phase 7 printed `will keep itself up to date`).
 
 Then tell them, in one short paragraph: what they can ask for, that writes are public and go out
 under their name, and that `uv run doctor.py` is the answer to "it stopped working".
@@ -552,10 +586,45 @@ wrong turn with this bundle. It sends the member through login loops that cannot
 | Tools vanished from the app | Phase 4, and restart the app |
 | Everything worked yesterday, nothing today | `uv run doctor.py`. If live auth fails, Phase 2; if it reports a CDN block, `net_check.py` |
 | Doctor warns the login expires soon | Phase 2 before it does |
-| One specific tool returns odd or empty data | Skool may have changed their site. Note which tool, check for a bundle update |
+| One specific tool returns odd or empty data | Skool may have changed their site. Note which tool, then see "Updating" below |
 
 A missing `aws-waf-token` is **not** a fault and never needs fixing. Measured against live api2 on
 2026-08-13, `auth_token` alone authenticates fine. Doctor reports the token as INFO only. Do not
 chase it.
 
 Never solve any of these by asking for a pasted cookie or by editing `.env` by hand.
+
+## Updating
+
+Updates normally install themselves (Phase 7), so this is only needed when the member asks.
+
+"Is it updating itself?":
+
+```bash
+uv run python ~/.solnest/autoupdate.py status
+```
+
+Stop all automatic updates: `uv run python ~/.solnest/autoupdate.py pause` (`resume` turns them
+back on).
+
+Update now, by hand:
+
+```bash
+uv run python update.py
+```
+
+It downloads the latest published release from GitHub (never untagged work on main) and replaces
+the bundle's own files. It never touches `.env`, the browser capture files or `.venv`. Every file
+it replaces or removes is copied to `.update-backup/` first, and it names any file the member had
+edited. Relay the lines it prints. Then run `uv sync` and the Phase 1 gate, then Phase 7 once more
+(it picks up a newer auto-updater if the release has one).
+
+- "Already on the latest release": nothing to do. Say so.
+- To go back one step: `uv run python update.py --undo`, then `uv sync`.
+- `uv run python update.py --check` only says whether a newer release exists.
+- "could not reach GitHub": offline or GitHub is down. Nothing changed. Try again later.
+- "still linked to git": run `bash detach_from_github.sh` first. If it keeps the link (a working
+  copy with code changes), update it with `git pull --ff-only` instead.
+- No `update.py` in the folder at all: this copy is from before automatic updates. If it is a git
+  clone, run `git pull --ff-only`, then `uv sync`, then Phase 7. If it came from a ZIP, download
+  the latest release ZIP, copy its files over this folder (keep `.env`), then `uv sync` and Phase 7.
